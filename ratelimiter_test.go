@@ -19,6 +19,42 @@ func TestNewRateLimiter(t *testing.T) {
 	}
 }
 
+func TestNewRateLimiter_InvalidRate(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("Expected panic for zero rate")
+		}
+	}()
+	NewRateLimiter(0, 5)
+}
+
+func TestNewRateLimiter_NegativeRate(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("Expected panic for negative rate")
+		}
+	}()
+	NewRateLimiter(-1, 5)
+}
+
+func TestNewRateLimiter_InvalidBurst(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("Expected panic for zero burst")
+		}
+	}()
+	NewRateLimiter(10, 0)
+}
+
+func TestNewRateLimiter_NegativeBurst(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Error("Expected panic for negative burst")
+		}
+	}()
+	NewRateLimiter(10, -1)
+}
+
 func TestRateLimiter_Allow_BurstCapacity(t *testing.T) {
 	rl := NewRateLimiter(1, 3) // 1 req/sec, burst of 3
 

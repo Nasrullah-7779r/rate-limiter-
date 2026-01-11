@@ -15,7 +15,15 @@ type RateLimiter struct {
 }
 
 // NewRateLimiter creates a new rate limiter with the specified rate (requests per second) and burst capacity
+// rate must be positive and burst must be greater than zero
 func NewRateLimiter(rate float64, burst int) *RateLimiter {
+	if rate <= 0 {
+		panic("rate must be positive")
+	}
+	if burst <= 0 {
+		panic("burst must be greater than zero")
+	}
+
 	return &RateLimiter{
 		rate:       rate,
 		burst:      burst,
@@ -65,8 +73,9 @@ func (rl *RateLimiter) Wait() {
 			return
 		}
 
-		// Calculate exact wait time needed
-		waitTime := time.Duration((1.0-rl.tokens)/rl.rate*1000) * time.Millisecond
+		// Calculate exact wait time needed for 1 token
+		tokensNeeded := 1.0 - rl.tokens
+		waitTime := time.Duration(tokensNeeded/rl.rate*1000) * time.Millisecond
 		rl.mu.Unlock()
 
 		time.Sleep(waitTime)
