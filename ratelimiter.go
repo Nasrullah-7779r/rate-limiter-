@@ -24,22 +24,24 @@ func NewRateLimiter(rate float64, burst int) *RateLimiter {
 	}
 }
 
+// refillTokens updates the token count based on elapsed time
+// Must be called with the mutex held
+func (rl *RateLimiter) refillTokens(now time.Time) {
+	elapsed := now.Sub(rl.lastUpdate).Seconds()
+	rl.tokens += elapsed * rl.rate
+	if rl.tokens > float64(rl.burst) {
+		rl.tokens = float64(rl.burst)
+	}
+	rl.lastUpdate = now
+}
+
 // Allow checks if a request is allowed based on the rate limit
 // Returns true if the request is allowed, false otherwise
 func (rl *RateLimiter) Allow() bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	now := time.Now()
-	elapsed := now.Sub(rl.lastUpdate).Seconds()
-
-	// Add tokens based on elapsed time
-	rl.tokens += elapsed * rl.rate
-	if rl.tokens > float64(rl.burst) {
-		rl.tokens = float64(rl.burst)
-	}
-
-	rl.lastUpdate = now
+	rl.refillTokens(time.Now())
 
 	// Check if we have at least 1 token
 	if rl.tokens >= 1.0 {
@@ -54,16 +56,7 @@ func (rl *RateLimiter) Allow() bool {
 func (rl *RateLimiter) Wait() {
 	for {
 		rl.mu.Lock()
-		now := time.Now()
-		elapsed := now.Sub(rl.lastUpdate).Seconds()
-
-		// Add tokens based on elapsed time
-		rl.tokens += elapsed * rl.rate
-		if rl.tokens > float64(rl.burst) {
-			rl.tokens = float64(rl.burst)
-		}
-
-		rl.lastUpdate = now
+		rl.refillTokens(time.Now())
 
 		// Check if we have at least 1 token
 		if rl.tokens >= 1.0 {
