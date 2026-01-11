@@ -1,14 +1,15 @@
-# Rate Limiter
+# Rate Limiter - Sliding Window Log
 
-A simple and efficient rate limiter implementation in Go using the token bucket algorithm.
+A simple and efficient rate limiter implementation in Go using the Sliding Window Log algorithm.
 
 ## Features
 
-- **Token Bucket Algorithm**: Efficient and widely-used rate limiting algorithm
+- **Sliding Window Log Algorithm**: Precise rate limiting with accurate request tracking
 - **Thread-Safe**: Safe for concurrent use across multiple goroutines
-- **Configurable**: Set custom rate limits and burst capacity
+- **Configurable**: Set custom request limits and time windows
 - **Flexible**: Support for both immediate checks and blocking waits
 - **Zero Dependencies**: Built using only Go standard library
+- **Memory Efficient**: Automatically cleans up expired request logs
 
 ## Installation
 
@@ -25,13 +26,14 @@ package main
 
 import (
     "fmt"
+    "time"
     ratelimiter "github.com/Nasrullah-7779r/rate-limiter-"
 )
 
 func main() {
-    // Create a rate limiter: 10 requests per second, burst of 5
-    rl := ratelimiter.NewRateLimiter(10, 5)
-    
+    // Create a rate limiter: 10 requests per second
+    rl := ratelimiter.NewRateLimiter(10, time.Second)
+
     // Check if a request is allowed
     if rl.Allow() {
         fmt.Println("Request allowed")
@@ -41,7 +43,7 @@ func main() {
 }
 ```
 
-### Wait for Available Token
+### Wait for Available Slot
 
 ```go
 // Block until a request is allowed
@@ -49,21 +51,21 @@ rl.Wait()
 fmt.Println("Request processed")
 ```
 
-### Monitor Available Tokens
+### Monitor Request Count
 
 ```go
-tokens := rl.GetTokens()
-fmt.Printf("Available tokens: %.2f\n", tokens)
+count := rl.GetRequestCount()
+fmt.Printf("Requests in current window: %d\n", count)
 ```
 
 ## API Reference
 
-### `NewRateLimiter(rate float64, burst int) *RateLimiter`
+### `NewRateLimiter(maxRequests int, window time.Duration) *RateLimiter`
 
-Creates a new rate limiter with the specified rate and burst capacity.
+Creates a new rate limiter with the specified maximum requests and time window.
 
-- `rate`: Number of requests allowed per second
-- `burst`: Maximum number of requests that can be made immediately (bucket capacity)
+- `maxRequests`: Maximum number of requests allowed within the time window
+- `window`: Time window duration (e.g., `time.Second`, `time.Minute`)
 
 ### `Allow() bool`
 
@@ -73,24 +75,48 @@ Checks if a request is allowed based on the current rate limit. Returns `true` i
 
 Blocks until a request is allowed. Use this when you want to ensure the request is processed rather than being denied.
 
-### `GetTokens() float64`
+### `GetRequestCount() int`
 
-Returns the current number of available tokens. Useful for monitoring and debugging.
+Returns the current number of requests in the sliding window. Useful for monitoring and debugging.
 
 ## How It Works
 
-The rate limiter uses the **token bucket algorithm**:
+The rate limiter uses the **Sliding Window Log algorithm**:
 
-1. Tokens are added to the bucket at a constant rate (the configured rate)
-2. The bucket has a maximum capacity (the burst capacity)
-3. Each request consumes one token
-4. If tokens are available, the request is allowed
-5. If no tokens are available, the request is denied (or waits)
+1. Each request timestamp is logged in memory
+2. When a new request arrives, old requests outside the time window are removed
+3. If the number of requests within the window is less than the limit, the request is allowed
+4. Otherwise, the request is denied (or waits until the oldest request expires)
 
-This allows for:
-- Smooth rate limiting over time
-- Burst handling for temporary spikes
-- Efficient token refill without timers
+This provides:
+
+- **Precise rate limiting**: Exact tracking of requests within the time window
+- **No burst issues**: Prevents request spikes at window boundaries
+- **Fair distribution**: Requests are smoothly distributed over time
+- **Predictable behavior**: Easy to understand and reason about
+
+## Example Scenarios
+
+### HTTP API Rate Limiting
+
+```go
+// Allow 100 requests per minute
+rl := ratelimiter.NewRateLimiter(100, time.Minute)
+```
+
+### Database Query Throttling
+
+```go
+// Allow 10 queries per second
+rl := ratelimiter.NewRateLimiter(10, time.Second)
+```
+
+### User Action Limiting
+
+```go
+// Allow 5 login attempts per 5 minutes
+rl := ratelimiter.NewRateLimiter(5, 5*time.Minute)
+```
 
 ## Testing
 

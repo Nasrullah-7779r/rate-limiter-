@@ -8,10 +8,10 @@ import (
 )
 
 func main() {
-	// Example 1: Basic usage with burst capacity
-	fmt.Println("Example 1: Basic Rate Limiting")
-	fmt.Println("Creating rate limiter: 2 requests/second, burst of 5")
-	rl := ratelimiter.NewRateLimiter(2, 5)
+	// Example 1: Basic usage with sliding window
+	fmt.Println("Example 1: Basic Sliding Window Log Rate Limiting")
+	fmt.Println("Creating rate limiter: 5 requests per second")
+	rl := ratelimiter.NewRateLimiter(5, time.Second)
 
 	fmt.Println("\nSending 10 requests immediately:")
 	for i := 1; i <= 10; i++ {
@@ -22,10 +22,10 @@ func main() {
 		}
 	}
 
-	// Example 2: Rate limiting over time
-	fmt.Println("\n\nExample 2: Rate Limiting Over Time")
-	fmt.Println("Creating rate limiter: 5 requests/second, burst of 2")
-	rl2 := ratelimiter.NewRateLimiter(5, 2)
+	// Example 2: Rate limiting over time with window sliding
+	fmt.Println("\n\nExample 2: Sliding Window Over Time")
+	fmt.Println("Creating rate limiter: 3 requests per 500ms")
+	rl2 := ratelimiter.NewRateLimiter(3, 500*time.Millisecond)
 
 	fmt.Println("\nSending requests over 2 seconds:")
 	start := time.Now()
@@ -37,12 +37,12 @@ func main() {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	fmt.Printf("\nTotal requests allowed: %d (expected ~10-12)\n", count)
+	fmt.Printf("\nTotal requests allowed: %d\n", count)
 
 	// Example 3: Using Wait method
 	fmt.Println("\n\nExample 3: Using Wait Method")
-	fmt.Println("Creating rate limiter: 3 requests/second, burst of 1")
-	rl3 := ratelimiter.NewRateLimiter(3, 1)
+	fmt.Println("Creating rate limiter: 2 requests per 500ms")
+	rl3 := ratelimiter.NewRateLimiter(2, 500*time.Millisecond)
 
 	fmt.Println("\nSending 5 requests with Wait (blocks until allowed):")
 	for i := 1; i <= 5; i++ {
@@ -52,17 +52,17 @@ func main() {
 		fmt.Printf("Request %d: processed after waiting %v\n", i, elapsed.Round(time.Millisecond))
 	}
 
-	// Example 4: Monitoring available tokens
-	fmt.Println("\n\nExample 4: Monitoring Available Tokens")
-	rl4 := ratelimiter.NewRateLimiter(10, 5)
+	// Example 4: Monitoring request count
+	fmt.Println("\n\nExample 4: Monitoring Request Count")
+	rl4 := ratelimiter.NewRateLimiter(5, time.Second)
 
-	fmt.Printf("Initial tokens: %.2f\n", rl4.GetTokens())
+	fmt.Printf("Initial request count: %d\n", rl4.GetRequestCount())
 
 	for i := 1; i <= 3; i++ {
 		rl4.Allow()
-		fmt.Printf("After request %d, tokens: %.2f\n", i, rl4.GetTokens())
+		fmt.Printf("After request %d, count in window: %d\n", i, rl4.GetRequestCount())
 	}
 
-	time.Sleep(200 * time.Millisecond)
-	fmt.Printf("After 200ms wait, tokens: %.2f\n", rl4.GetTokens())
+	time.Sleep(1100 * time.Millisecond)
+	fmt.Printf("After 1.1s wait (window expired), count: %d\n", rl4.GetRequestCount())
 }

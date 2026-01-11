@@ -5,42 +5,47 @@ import (
 	"time"
 )
 
-// RateLimiter implements a token bucket rate limiter
+// RateLimiter implements a sliding window log rate limiter
 type RateLimiter struct {
-	rate       float64   // tokens per second
-	burst      int       // maximum tokens in the bucket
-	tokens     float64   // current tokens available
-	lastUpdate time.Time // last time tokens were updated
-	mu         sync.Mutex
+	maxRequests int           // maximum requests allowed in the window
+	window      time.Duration // time window duration
+	requests    []time.Time   // log of request timestamps
+	mu          sync.Mutex
 }
 
-// NewRateLimiter creates a new rate limiter with the specified rate (requests per second) and burst capacity
-// rate must be positive and burst must be greater than zero
-func NewRateLimiter(rate float64, burst int) *RateLimiter {
-	if rate <= 0 {
-		panic("rate must be positive")
+// NewRateLimiter creates a new sliding window log rate limiter
+// maxRequests: maximum number of requests allowed in the time window
+// window: time window duration (e.g., 1 second, 1 minute)
+func NewRateLimiter(maxRequests int, window time.Duration) *RateLimiter {
+	if maxRequests <= 0 {
+		panic("maxRequests must be positive")
 	}
-	if burst <= 0 {
-		panic("burst must be greater than zero")
+	if window <= 0 {
+		panic("window must be positive")
 	}
 
 	return &RateLimiter{
-		rate:       rate,
-		burst:      burst,
-		tokens:     float64(burst),
-		lastUpdate: time.Now(),
+		maxRequests: maxRequests,
+		window:      window,
+		requests:    make([]time.Time, 0, maxRequests),
 	}
 }
 
-// refillTokens updates the token count based on elapsed time
+// cleanOldRequests removes requests that are outside the current time window
 // Must be called with the mutex held
-func (rl *RateLimiter) refillTokens(now time.Time) {
-	elapsed := now.Sub(rl.lastUpdate).Seconds()
-	rl.tokens += elapsed * rl.rate
-	if rl.tokens > float64(rl.burst) {
-		rl.tokens = float64(rl.burst)
+func (rl *RateLimiter) cleanOldRequests(now time.Time) {
+	cutoff := now.Add(-rl.window)
+
+	// Find the first request that is still within the window
+	validIdx := 0
+	for validIdx < len(rl.requests) && rl.requests[validIdx].Before(cutoff) {
+		validIdx++
 	}
-	rl.lastUpdate = now
+
+	// Keep only the valid requests
+	if validIdx > 0 {
+		rl.requests = rl.requests[validIdx:]
+	}
 }
 
 // Allow checks if a request is allowed based on the rate limit
@@ -49,11 +54,12 @@ func (rl *RateLimiter) Allow() bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	rl.refillTokens(time.Now())
+	now := time.Now()
+	rl.cleanOldRequests(now)
 
-	// Check if we have at least 1 token
-	if rl.tokens >= 1.0 {
-		rl.tokens -= 1.0
+	// Check if we have capacity for another request
+	if len(rl.requests) < rl.maxRequests {
+		rl.requests = append(rl.requests, now)
 		return true
 	}
 
@@ -64,38 +70,32 @@ func (rl *RateLimiter) Allow() bool {
 func (rl *RateLimiter) Wait() {
 	for {
 		rl.mu.Lock()
-		rl.refillTokens(time.Now())
+		now := time.Now()
+		rl.cleanOldRequests(now)
 
-		// Check if we have at least 1 token
-		if rl.tokens >= 1.0 {
-			rl.tokens -= 1.0
+		// Check if we have capacity for another request
+		if len(rl.requests) < rl.maxRequests {
+			rl.requests = append(rl.requests, now)
 			rl.mu.Unlock()
 			return
 		}
 
-		// Calculate exact wait time needed for 1 token
-		tokensNeeded := 1.0 - rl.tokens
-		waitTime := time.Duration(tokensNeeded/rl.rate*1000) * time.Millisecond
+		// Calculate wait time: oldest request time + window - now
+		waitUntil := rl.requests[0].Add(rl.window)
+		waitTime := waitUntil.Sub(now)
 		rl.mu.Unlock()
 
-		time.Sleep(waitTime)
+		if waitTime > 0 {
+			time.Sleep(waitTime)
+		}
 	}
 }
 
-// GetTokens returns the current number of available tokens (for testing/monitoring)
-// Note: This is a read-only operation and does not update the internal state
-func (rl *RateLimiter) GetTokens() float64 {
+// GetRequestCount returns the current number of requests in the window (for testing/monitoring)
+func (rl *RateLimiter) GetRequestCount() int {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
 
-	now := time.Now()
-	elapsed := now.Sub(rl.lastUpdate).Seconds()
-
-	// Calculate tokens without modifying state
-	tokens := rl.tokens + elapsed*rl.rate
-	if tokens > float64(rl.burst) {
-		tokens = float64(rl.burst)
-	}
-
-	return tokens
+	rl.cleanOldRequests(time.Now())
+	return len(rl.requests)
 }

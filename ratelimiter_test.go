@@ -7,119 +7,118 @@ import (
 )
 
 func TestNewRateLimiter(t *testing.T) {
-	rl := NewRateLimiter(10, 5)
-	if rl.rate != 10 {
-		t.Errorf("Expected rate 10, got %f", rl.rate)
+	rl := NewRateLimiter(10, time.Second)
+	if rl.maxRequests != 10 {
+		t.Errorf("Expected maxRequests 10, got %d", rl.maxRequests)
 	}
-	if rl.burst != 5 {
-		t.Errorf("Expected burst 5, got %d", rl.burst)
+	if rl.window != time.Second {
+		t.Errorf("Expected window 1s, got %v", rl.window)
 	}
-	if rl.tokens != 5 {
-		t.Errorf("Expected initial tokens 5, got %f", rl.tokens)
+	if len(rl.requests) != 0 {
+		t.Errorf("Expected initial requests 0, got %d", len(rl.requests))
 	}
 }
 
-func TestNewRateLimiter_InvalidRate(t *testing.T) {
+func TestNewRateLimiter_InvalidMaxRequests(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
-			t.Error("Expected panic for zero rate")
+			t.Error("Expected panic for zero maxRequests")
 		}
 	}()
-	NewRateLimiter(0, 5)
+	NewRateLimiter(0, time.Second)
 }
 
-func TestNewRateLimiter_NegativeRate(t *testing.T) {
+func TestNewRateLimiter_NegativeMaxRequests(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
-			t.Error("Expected panic for negative rate")
+			t.Error("Expected panic for negative maxRequests")
 		}
 	}()
-	NewRateLimiter(-1, 5)
+	NewRateLimiter(-1, time.Second)
 }
 
-func TestNewRateLimiter_InvalidBurst(t *testing.T) {
+func TestNewRateLimiter_InvalidWindow(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
-			t.Error("Expected panic for zero burst")
+			t.Error("Expected panic for zero window")
 		}
 	}()
 	NewRateLimiter(10, 0)
 }
 
-func TestNewRateLimiter_NegativeBurst(t *testing.T) {
+func TestNewRateLimiter_NegativeWindow(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
-			t.Error("Expected panic for negative burst")
+			t.Error("Expected panic for negative window")
 		}
 	}()
-	NewRateLimiter(10, -1)
+	NewRateLimiter(10, -1*time.Second)
 }
 
-func TestRateLimiter_Allow_BurstCapacity(t *testing.T) {
-	rl := NewRateLimiter(1, 3) // 1 req/sec, burst of 3
+func TestRateLimiter_Allow_InitialRequests(t *testing.T) {
+	rl := NewRateLimiter(3, time.Second)
 
-	// Should allow burst requests immediately
+	// Should allow up to maxRequests immediately
 	for i := 0; i < 3; i++ {
 		if !rl.Allow() {
-			t.Errorf("Request %d should be allowed (burst)", i+1)
+			t.Errorf("Request %d should be allowed", i+1)
 		}
 	}
 
-	// Next request should be denied (burst exhausted)
+	// Next request should be denied (limit reached)
 	if rl.Allow() {
-		t.Error("Request should be denied after burst exhausted")
+		t.Error("Request should be denied after limit reached")
 	}
 }
 
-func TestRateLimiter_Allow_TokenRefill(t *testing.T) {
-	rl := NewRateLimiter(10, 1) // 10 req/sec, burst of 1
+func TestRateLimiter_Allow_WindowSliding(t *testing.T) {
+	rl := NewRateLimiter(2, 200*time.Millisecond)
 
-	// Use the initial token
+	// Use up the limit
 	if !rl.Allow() {
 		t.Error("First request should be allowed")
+	}
+	if !rl.Allow() {
+		t.Error("Second request should be allowed")
 	}
 
 	// Should be denied immediately
 	if rl.Allow() {
-		t.Error("Second request should be denied")
+		t.Error("Third request should be denied")
 	}
 
-	// Wait for token refill (100ms should give us 1 token at 10 req/sec)
-	time.Sleep(150 * time.Millisecond)
+	// Wait for the window to slide (oldest request to expire)
+	time.Sleep(250 * time.Millisecond)
 
 	// Should be allowed now
 	if !rl.Allow() {
-		t.Error("Request should be allowed after token refill")
+		t.Error("Request should be allowed after window slides")
 	}
 }
 
 func TestRateLimiter_Allow_RateLimit(t *testing.T) {
-	rate := 5.0 // 5 requests per second
-	rl := NewRateLimiter(rate, 10)
+	maxRequests := 5
+	window := time.Second
+	rl := NewRateLimiter(maxRequests, window)
 
-	// Exhaust initial burst
-	for i := 0; i < 10; i++ {
-		rl.Allow()
-	}
-
-	// Count allowed requests over 1 second
+	// Count allowed requests over 2 seconds
 	start := time.Now()
 	allowed := 0
-	for time.Since(start) < 1*time.Second {
+	for time.Since(start) < 2*time.Second {
 		if rl.Allow() {
 			allowed++
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 	}
 
-	// Should be approximately 5 requests allowed (with some tolerance)
-	if allowed < 4 || allowed > 6 {
-		t.Errorf("Expected ~5 requests allowed in 1 second, got %d", allowed)
+	// Should allow approximately 10 requests over 2 seconds (5 per second)
+	if allowed < 8 || allowed > 12 {
+		t.Errorf("Expected ~10 requests allowed in 2 seconds, got %d", allowed)
 	}
 }
 
 func TestRateLimiter_ConcurrentAccess(t *testing.T) {
-	rl := NewRateLimiter(100, 50) // 100 req/sec, burst of 50
+	rl := NewRateLimiter(50, time.Second)
 	var wg sync.WaitGroup
 	allowed := 0
 	var mu sync.Mutex
@@ -139,73 +138,73 @@ func TestRateLimiter_ConcurrentAccess(t *testing.T) {
 
 	wg.Wait()
 
-	// Should allow at most burst capacity immediately
-	if allowed > 50 {
-		t.Errorf("Should not allow more than burst capacity, got %d", allowed)
-	}
-	if allowed < 40 {
-		t.Errorf("Should allow close to burst capacity, got %d", allowed)
+	// Should allow at most maxRequests
+	if allowed != 50 {
+		t.Errorf("Expected exactly 50 requests allowed, got %d", allowed)
 	}
 }
 
-func TestRateLimiter_GetTokens(t *testing.T) {
-	rl := NewRateLimiter(10, 5)
+func TestRateLimiter_GetRequestCount(t *testing.T) {
+	rl := NewRateLimiter(5, time.Second)
 
-	// Initial tokens should be burst capacity
-	tokens := rl.GetTokens()
-	if tokens < 4.9 || tokens > 5.1 {
-		t.Errorf("Expected ~5 tokens initially, got %f", tokens)
+	// Initial count should be 0
+	count := rl.GetRequestCount()
+	if count != 0 {
+		t.Errorf("Expected 0 requests initially, got %d", count)
 	}
 
-	// Use some tokens
+	// Make some requests
 	rl.Allow()
 	rl.Allow()
 
-	tokens = rl.GetTokens()
-	if tokens > 3.1 {
-		t.Errorf("Expected ~3 tokens after using 2, got %f", tokens)
+	count = rl.GetRequestCount()
+	if count != 2 {
+		t.Errorf("Expected 2 requests after allowing 2, got %d", count)
 	}
 }
 
 func TestRateLimiter_Wait(t *testing.T) {
-	rl := NewRateLimiter(10, 1) // 10 req/sec, burst of 1
+	rl := NewRateLimiter(1, 200*time.Millisecond)
 
-	// Use initial token
+	// Use the limit
 	if !rl.Allow() {
 		t.Error("First request should be allowed")
 	}
 
-	// Wait should block until token is available
+	// Wait should block until a slot is available
 	start := time.Now()
 	rl.Wait()
 	elapsed := time.Since(start)
 
-	// Should have waited at least 90ms (allowing some tolerance)
-	if elapsed < 80*time.Millisecond {
-		t.Errorf("Wait should block for ~100ms, blocked for %v", elapsed)
+	// Should have waited at least 180ms (allowing some tolerance)
+	if elapsed < 180*time.Millisecond {
+		t.Errorf("Wait should block for ~200ms, blocked for %v", elapsed)
+	}
+	if elapsed > 250*time.Millisecond {
+		t.Errorf("Wait blocked too long: %v", elapsed)
 	}
 }
 
-func TestRateLimiter_MaxTokensCapped(t *testing.T) {
-	rl := NewRateLimiter(10, 3) // 10 req/sec, burst of 3
+func TestRateLimiter_RequestsExpire(t *testing.T) {
+	rl := NewRateLimiter(3, 100*time.Millisecond)
 
-	// Exhaust tokens
+	// Fill up the limit
 	for i := 0; i < 3; i++ {
 		rl.Allow()
 	}
 
-	// Wait long enough to refill more than burst capacity
-	time.Sleep(1 * time.Second)
+	// Wait for requests to expire
+	time.Sleep(150 * time.Millisecond)
 
-	// Should only allow burst capacity, not more
+	// All 3 slots should be available again
 	allowed := 0
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 3; i++ {
 		if rl.Allow() {
 			allowed++
 		}
 	}
 
 	if allowed != 3 {
-		t.Errorf("Expected burst capacity (3) requests, got %d", allowed)
+		t.Errorf("Expected 3 requests to be allowed after expiry, got %d", allowed)
 	}
 }
